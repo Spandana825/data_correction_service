@@ -1,43 +1,47 @@
-from flask import request, jsonify
-from app import app
-from app.services.loader import load_data
-from app.services.analyser import train_model,models
-from app.services.model import predict_missing_values, get_model
+from flask import Blueprint, request, jsonify
+from app.services.train_service import start_training
+from app.services.model_service import get_model_status, predict_value, list_models
 
-@app.route('/test')
-def test():
-    return 'HI'
-@app.route('/api/models/train', methods=['POST'])
-def train_model_api():
-    file = request.files['file']
-    target_column = request.form['target_column']
+test_server_bp = Blueprint("test_server", __name__)
 
-    df = load_data(file)
-    if target_column not in df.columns:
-        return jsonify({"error": f"Target column '{target_column}' not found in data"}), 400
-    model_id = train_model(df, target_column)
+train_bp = Blueprint("train", __name__)
 
-    return jsonify({"message": "Model training completed", "model_id": model_id}), 200
+status_bp = Blueprint("status", __name__)
 
-@app.route('/api/models/status/<model_id>', methods=['GET'])
-def model_status(model_id):
-    model = get_model(model_id)
-    status = "ready" if model else "not found"
-    return jsonify({"model_id": model_id, "status": status}), 200
+list_models_bp = Blueprint("list_models", __name__)
 
-@app.route('/api/models', methods=['GET'])
-def list_models():
-    return jsonify({"models": list(models.keys())}), 200
+predict_bp = Blueprint("predict", __name__)
 
-@app.route('/api/correction', methods=['POST'])
-def data_correction():
+@test_server_bp.route("/test", methods=["GET"])
+def test_server():
+    return "Hi"
+
+@train_bp.route("/train", methods=["POST"])
+def train_model():
+    if "file" not in request.files or "model_name" not in request.form or "feature" not in request.form:
+        return jsonify({"error": "CSV file, feature, and model_name are required"}), 400
+
+    file = request.files["file"]
+    model_name = request.form["model_name"]
+    feature = request.form["feature"]
+
+    return start_training(file, model_name, feature)
+
+@status_bp.route("/<model_name>/status", methods=["GET"])
+def model_status(model_name):
+    return get_model_status(model_name)
+
+@list_models_bp.route("/models", methods=["GET"])
+def list_user_models():
+    return list_models()
+
+@predict_bp.route("/predict", methods=["POST"])
+def predict():
     data = request.get_json()
-    model_id = data['model_id']
-    input_data = data['data']
+    if not data or "model_name" not in data or "payload" not in data:
+        return jsonify({"error": "Model name and payload are required"}), 400
 
-    try:
-        corrected_df = predict_missing_values(model_id, input_data)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 404
-    
-    return jsonify({"corrected_data": corrected_df.to_dict(orient='records')}), 200
+    model_name = data["model_name"]
+    payload = data["payload"]
+
+    return predict_value(model_name, payload)
